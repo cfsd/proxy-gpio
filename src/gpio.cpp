@@ -43,7 +43,7 @@ int32_t main(int32_t argc, char **argv) {
     if ( (0 == commandlineArguments.count("port")) || (0 == commandlineArguments.count("cid")) ) {
         std::cerr << argv[0] << " testing unit and publishes it to a running OpenDaVINCI session using the OpenDLV Standard Message Set." << std::endl;
         std::cerr << "Usage:   " << argv[0] << "--port=<udp port>--cid=<OpenDaVINCI session> [--id=<Identifier in case of multiple beaglebone units>] [--verbose]" << std::endl;
-        std::cerr << "Example: " << argv[0] << "--port=8881 --cid=111 --id=1 --verbose=1" << std::endl;
+        std::cerr << "Example: " << argv[0] << " --port=8881 --cid=111 --id=1 --verbose=1" << std::endl;
         retCode = 1;
     } else {
         const uint32_t ID{(commandlineArguments["id"].size() != 0) ? static_cast<uint32_t>(std::stoi(commandlineArguments["id"])) : 0};
