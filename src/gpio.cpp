@@ -30,35 +30,30 @@
 #include <chrono>
 
 
-/*void callOnReceive(cluon::data::Envelope data){
-    if (data.dataType() == static_cast<int32_t>(opendlv::proxy::TemperatureReading::ID())) {
-        opendlv::proxy::TemperatureReading t = cluon::extractMessage<opendlv::proxy::TemperatureReading>(std::move(data));
-        std::cout << "Test function: temperature data:" << t.temperature() << std::endl;
-    }
-}*/
-
 int32_t main(int32_t argc, char **argv) {
     int32_t retCode{0};
     auto commandlineArguments = cluon::getCommandlineArguments(argc, argv);
     if ( (0 == commandlineArguments.count("port")) || (0 == commandlineArguments.count("cid")) ) {
         std::cerr << argv[0] << " testing unit and publishes it to a running OpenDaVINCI session using the OpenDLV Standard Message Set." << std::endl;
-        std::cerr << "Usage:   " << argv[0] << "--port=<udp port>--cid=<OpenDaVINCI session> [--id=<Identifier in case of multiple beaglebone units>] [--verbose]" << std::endl;
-        std::cerr << "Example: " << argv[0] << " --port=8881 --cid=111 --id=1 --verbose=1" << std::endl;
+        std::cerr << "Usage:   " << argv[0] << " --port=<udp port>--cid=<OpenDaVINCI session> [--id=<Identifier in case of multiple beaglebone units>] [--verbose]" << std::endl;
+        std::cerr << "Example: " << argv[0] << " --port=8881 --cid=111 --id=1 --verbose=1 --freq=30" << std::endl;
         retCode = 1;
     } else {
         const uint32_t ID{(commandlineArguments["id"].size() != 0) ? static_cast<uint32_t>(std::stoi(commandlineArguments["id"])) : 0};
         const bool VERBOSE{commandlineArguments.count("verbose") != 0};
+	    const double FREQ{static_cast<double>(std::stof(commandlineArguments["freq"]))};
+
         std::cout << "Micro-Service ID:" << ID << std::endl;
 
         // Interface to a running OpenDaVINCI session.
-        Gpio gpio;
+        Gpio gpio(VERBOSE, ID);
 
         cluon::data::Envelope data;
         cluon::OD4Session od4{static_cast<uint16_t>(std::stoi(commandlineArguments["cid"])),
             [&data, &gp = gpio](cluon::data::Envelope &&envelope){
+
                 gp.callOnReceive(envelope);
                 // IMPORTANT INTRODUCE A MUTEX
-                data = envelope;
             }
         };
 
@@ -67,44 +62,42 @@ int32_t main(int32_t argc, char **argv) {
         const std::string PORT(commandlineArguments["port"]);
         
         cluon::UDPReceiver UdpSocket(ADDR, std::stoi(PORT),
-            [&od4Session = od4, &decoder=gpio, VERBOSE](std::string &&d, std::string &&/*from*/, std::chrono::system_clock::time_point &&tp) noexcept {
+            [&od4Session = od4, &decoder=gpio, VERBOSE, ID](std::string &&d, std::string &&/*from*/, std::chrono::system_clock::time_point &&tp) noexcept {
             
             cluon::data::TimeStamp sampleTime = cluon::time::convert(tp);
             std::time_t epoch_time = std::chrono::system_clock::to_time_t(tp);
-            std::cout << "Time: " << std::ctime(&epoch_time) << std::endl;
-            // decoder = gpio
+            std::cout << "[PROXY-GPIO-UDP] Time: " << std::ctime(&epoch_time) << std::endl;
+            std::cout << "[PROXY-GPIO-UDP] Got data:" << d << std::endl;
+
             int16_t senderStamp = (int16_t) decoder.decode(d);
             int16_t pinState = (int16_t) round((decoder.decode(d)- ((float) senderStamp))*10);
+            senderStamp += (int16_t) ID*1000;
             // if (retVal.first) {
 
             opendlv::proxy::SwitchStateRequest msg;
             msg.state(pinState);
             od4Session.send(msg, sampleTime, senderStamp);
 
-            //     // Print values on console.
-            //     if (VERBOSE) {
-            //         std::stringstream buffer;
-            //         msg1.accept([](uint32_t, const std::string &, const std::string &) {},
-            //                    [&buffer](uint32_t, std::string &&, std::string &&n, auto v) { buffer << n << " = " << v << '\n'; },
-            //                    []() {});
-            //         std::cout << buffer.str() << std::endl;
-            //     }
-            // }
         });
 
         // Just sleep as this microservice is data driven.
         using namespace std::literals::chrono_literals;
         // uint32_t count = 0;
+        std::chrono::system_clock::time_point threadTime = std::chrono::system_clock::now();
+        std::chrono::system_clock::time_point threadTime_old = std::chrono::system_clock::now();
         while (od4.isRunning()) {
-            std::this_thread::sleep_for(1s);
+            
+            std::this_thread::sleep_until(std::chrono::duration<double>(1/FREQ)+threadTime);
+            threadTime_old = threadTime;
+            threadTime = std::chrono::system_clock::now();
+            if (VERBOSE){             
+                auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(threadTime.time_since_epoch()).count();
+                auto millis_old = std::chrono::duration_cast<std::chrono::milliseconds>(threadTime_old.time_since_epoch()).count();
+                std::cout << "[THREAD] Time: " << millis << "\tMeasured Period: " << millis-millis_old << "\tPeriod: " << 1/FREQ << std::endl;
+            }
+            
+
             gpio.body(od4);
-            /*if (data.dataType() == static_cast<int32_t>(opendlv::proxy::SwitchStateRequest::ID())) {
-                opendlv::proxy::SwitchStateRequest gpioState = cluon::extractMessage<opendlv::proxy::SwitchStateRequest>(std::move(data));
-                uint16_t pin = data.senderStamp();
-                bool value = gpioState.state();
-                std::cout << "While loop: Most recent state data:" << value << " Pin:" << pin << std::endl;
-            }*/
-            // count++;
         }
     }
     return retCode;

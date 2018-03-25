@@ -33,7 +33,7 @@ class Gpio {
     //Gpio &operator=(Gpio &&) = delete;
 
    public:
-    Gpio();
+    Gpio(bool VERBOSE, uint32_t ssOffsetGpio);
     ~Gpio();
 
    public:
@@ -53,13 +53,13 @@ class Gpio {
     void SetValue(uint16_t const, bool const);
     bool GetValue(uint16_t const) const;
 
-    //bool m_debug;
+    bool m_debug;
+    uint32_t m_bbbId;
+    uint32_t m_senderStampOffsetGpio;
     bool m_initialised;
     std::vector<std::pair<bool, std::string>> m_initialValuesDirections;
     std::string m_path;
     std::vector<uint16_t> m_pins;
-    //cluon::OD4Session m_od4Session;
-
 };
 
 #endif

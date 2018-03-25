@@ -30,15 +30,16 @@
 #include <chrono>
 
 float Gpio::decode(const std::string &data) noexcept {
-    std::cout << "Got data:" << data << std::endl;
     float temp = std::stof(data);
     return temp;
 }
 
-Gpio::Gpio()
+Gpio::Gpio(bool VERBOSE, uint32_t id)
     //: TimeTriggeredConferenceClientModule(argc, argv, "proxy-miniature-gpio")
-    //, m_debug()
-    : m_initialised()
+    : m_debug(VERBOSE)
+    , m_bbbId(id)
+    , m_senderStampOffsetGpio(id*1000)
+    , m_initialised()
     , m_initialValuesDirections()
     , m_path()
     , m_pins()
@@ -69,11 +70,11 @@ void Gpio::setUp()
         m_pins.push_back(pin);
         m_initialValuesDirections.push_back(std::make_pair(value, direction));
       } else {
-        std::cout << "[GPIO] " << "Invalid direction for pin " 
+        std::cerr << "[GPIO] " << "Invalid direction for pin " 
             << pin << "." << std::endl;
       }
     }
-    /*if (m_debug) {
+    if (m_debug) {
       std::cout << "[GPIO] " << "Initialised pins: ";
       for (auto pin : m_pins) {
          std::cout << pin << " ";
@@ -83,9 +84,9 @@ void Gpio::setUp()
         std::cout << "(" << pair.first << "," << pair.second << ") ";
       }
       std::cout << std::endl;
-    }*/
+    }
   } else {
-    std::cout << "[GPIO] Number of pins do not equals to number of values or directions" 
+    std::cerr << "[GPIO] Number of pins do not equals to number of values or directions" 
         << std::endl;
   }
 
@@ -104,14 +105,11 @@ void Gpio::body(cluon::OD4Session &od4)
 
     for (auto pin : m_pins) {
         bool pinState = GetValue(pin);
-        //std::cout << pinState << std::endl;
+
         std::chrono::system_clock::time_point tp = std::chrono::system_clock::now();
         cluon::data::TimeStamp sampleTime = cluon::time::convert(tp);
-        //std::time_t epoch_time = std::chrono::system_clock::to_time_t(tp);
-        //std::cout << "Time: " << std::ctime(&epoch_time) << std::endl;
-        // decoder = gpio
 
-        int16_t senderStamp = (int16_t) pin;
+        int16_t senderStamp = (int16_t) pin + m_senderStampOffsetGpio;
         opendlv::proxy::SwitchStateReading msg;
         msg.state(pinState);
 
@@ -135,24 +133,28 @@ void Gpio::callOnReceive(cluon::data::Envelope data){
     }
     if (data.dataType() == static_cast<int32_t>(opendlv::proxy::SwitchStateRequest::ID())) {
         opendlv::proxy::SwitchStateRequest gpioState = cluon::extractMessage<opendlv::proxy::SwitchStateRequest>(std::move(data));
-        uint16_t pin = data.senderStamp();
+        uint16_t pin = data.senderStamp()-m_senderStampOffsetGpio;
         bool value = gpioState.state();
+
+        if (m_debug){
+          std::cout << "[GPIO-WRITE] Recieved request:\tpin: " << pin << "\tvalue: " << value << std::endl;
+        }
         
         if (GetDirection(pin).compare("out") == 0) {
         SetValue(pin, value);
         } else {
-        std::cout << "[GPIO] The requested pin " << pin
+        std::cout << "[GPIO-WRITE] The requested pin " << pin
             << " is read-only." 
             << std::endl;
         }
 
         std::cout << "Test function: State:" << value << " Pin:" << pin << std::endl;
-    }else if (data.dataType() == static_cast<int32_t>(opendlv::proxy::SwitchStateReading::ID())) {
+    }else if (m_debug && data.dataType() == static_cast<int32_t>(opendlv::proxy::SwitchStateReading::ID())) {
         opendlv::proxy::SwitchStateReading gpioState = cluon::extractMessage<opendlv::proxy::SwitchStateReading>(std::move(data));
-        uint16_t pin = data.senderStamp();
+        uint16_t pin = data.senderStamp()-m_senderStampOffsetGpio;
         bool value = gpioState.state();
 
-        std::cout << "[GPIO] The read pin: " << pin
+        std::cout << "[GPIO-READ] The read pin: " << pin
             << " state:"
  	    << value
             << std::endl;
