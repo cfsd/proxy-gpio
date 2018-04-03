@@ -56,9 +56,9 @@ void Gpio::setUp()
   //odcore::base::KeyValueConfiguration kv = getKeyValueConfiguration();
 
   m_path = "/sys/class/gpio";
-  std::vector<std::string> pinsVector = {"26","27","44","45","46","47","61","62","65","66", "67", "68", "69", "112", "115", "117"};
+  std::vector<std::string> pinsVector = {"26","27","44","45","46","47","49","61","62","65","66", "67", "68", "69", "112", "115"};
   std::vector<std::string> initialValuesVector = {"0","0","0","0","0","0","0","0","0","0", "0", "0", "0", "0", "0", "0"};
-  std::vector<std::string> initialDirectionsVector = {"out","out","out","out","out","out","out","out","out","out", "out", "out", "out", "in", "in", "in"};
+  std::vector<std::string> initialDirectionsVector = {"out","out","out","out","out","out","in","out","out","out","out", "out", "out", "out", "in", "in"};
 
   if (pinsVector.size() == initialValuesVector.size() 
       && pinsVector.size() == initialDirectionsVector.size()) {
