@@ -148,7 +148,7 @@ void Gpio::callOnReceive(cluon::data::Envelope data){
             << std::endl;
         }
 
-        std::cout << "Test function: State:" << value << " Pin:" << pin << std::endl;
+        //std::cout << "Test function: State:" << value << " Pin:" << pin << std::endl;
     }else if (m_debug && data.dataType() == static_cast<int32_t>(opendlv::proxy::SwitchStateReading::ID())) {
         opendlv::proxy::SwitchStateReading gpioState = cluon::extractMessage<opendlv::proxy::SwitchStateReading>(std::move(data));
         uint16_t pin = data.senderStamp()-m_senderStampOffsetGpio;
