@@ -41,7 +41,7 @@ int32_t main(int32_t argc, char **argv) {
     } else {
         const uint32_t ID{(commandlineArguments["id"].size() != 0) ? static_cast<uint32_t>(std::stoi(commandlineArguments["id"])) : 0};
         const bool VERBOSE{commandlineArguments.count("verbose") != 0};
-	    const double FREQ{static_cast<double>(std::stof(commandlineArguments["freq"]))};
+	    const float FREQ{std::stof(commandlineArguments["freq"])};
 
         std::cout << "Micro-Service ID:" << ID << std::endl;
 
@@ -83,22 +83,13 @@ int32_t main(int32_t argc, char **argv) {
         // Just sleep as this microservice is data driven.
         using namespace std::literals::chrono_literals;
         // uint32_t count = 0;
-        std::chrono::system_clock::time_point threadTime = std::chrono::system_clock::now();
-        std::chrono::system_clock::time_point threadTime_old = std::chrono::system_clock::now();
-        while (od4.isRunning()) {
-            
-            std::this_thread::sleep_until(std::chrono::duration<double>(1/FREQ)+threadTime);
-            threadTime_old = threadTime;
-            threadTime = std::chrono::system_clock::now();
-            if (VERBOSE){             
-                auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(threadTime.time_since_epoch()).count();
-                auto millis_old = std::chrono::duration_cast<std::chrono::milliseconds>(threadTime_old.time_since_epoch()).count();
-                std::cout << "[THREAD] Time: " << millis << "\tMeasured Period: " << millis-millis_old << "\tPeriod: " << 1/FREQ << std::endl;
-            }
-            
-
+        auto atFrequency{[&od4, &gpio]() -> bool
+        {            
             gpio.body(od4);
-        }
+            return true;
+        }};
+
+        od4.timeTrigger(FREQ, atFrequency);
     }
     return retCode;
 }
