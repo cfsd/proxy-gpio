@@ -56,33 +56,32 @@ int32_t main(int32_t argc, char **argv) {
                 // IMPORTANT INTRODUCE A MUTEX
             }
         };
-
+        
         // Interface to OxTS.
         const std::string ADDR("0.0.0.0");
         const std::string PORT(commandlineArguments["port"]);
         
-        cluon::UDPReceiver UdpSocket(ADDR, std::stoi(PORT),
-            [&od4Session = od4, &decoder=gpio, VERBOSE, ID](std::string &&d, std::string &&/*from*/, std::chrono::system_clock::time_point &&tp) noexcept {
-            
-            cluon::data::TimeStamp sampleTime = cluon::time::convert(tp);
-            std::time_t epoch_time = std::chrono::system_clock::to_time_t(tp);
-            std::cout << "[PROXY-GPIO-UDP] Time: " << std::ctime(&epoch_time) << std::endl;
-            std::cout << "[PROXY-GPIO-UDP] Got data:" << d << std::endl;
+        //if (VERBOSE){
+            cluon::UDPReceiver UdpSocket(ADDR, std::stoi(PORT),
+                [&od4Session = od4, &decoder=gpio, VERBOSE, ID](std::string &&d, std::string &&/*from*/, std::chrono::system_clock::time_point &&tp) noexcept {
+                
+                cluon::data::TimeStamp sampleTime = cluon::time::convert(tp);
+                std::time_t epoch_time = std::chrono::system_clock::to_time_t(tp);
+                std::cout << "[PROXY-GPIO-UDP] Time: " << std::ctime(&epoch_time) << std::endl;
+                std::cout << "[PROXY-GPIO-UDP] Got data:" << d << std::endl;
 
-            int16_t senderStamp = (int16_t) decoder.decode(d);
-            int16_t pinState = (int16_t) round((decoder.decode(d)- ((float) senderStamp))*10);
-            senderStamp += (int16_t) ID*1000;
-            // if (retVal.first) {
+                int16_t senderStamp = (int16_t) decoder.decode(d);
+                int16_t pinState = (int16_t) round((decoder.decode(d)- ((float) senderStamp))*10);
+                senderStamp += (int16_t) ID*1000;
+                // if (retVal.first) {
 
-            opendlv::proxy::SwitchStateRequest msg;
-            msg.state(pinState);
-            od4Session.send(msg, sampleTime, senderStamp);
+                opendlv::proxy::SwitchStateRequest msg;
+                msg.state(pinState);
+                od4Session.send(msg, sampleTime, senderStamp);
 
-        });
+            });
+        //}
 
-        // Just sleep as this microservice is data driven.
-        using namespace std::literals::chrono_literals;
-        // uint32_t count = 0;
         auto atFrequency{[&od4, &gpio]() -> bool
         {            
             gpio.body(od4);

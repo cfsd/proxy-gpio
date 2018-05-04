@@ -51,7 +51,7 @@ class Gpio {
     void SetDirection(uint16_t const, std::string);
     std::string GetDirection(uint16_t const) const;
     void SetValue(uint16_t const, bool const);
-    bool GetValue(uint16_t const) const;
+    bool GetValue(uint16_t const);
 
     bool m_debug;
     uint32_t m_bbbId;
@@ -60,6 +60,8 @@ class Gpio {
     std::vector<std::pair<bool, std::string>> m_initialValuesDirections;
     std::string m_path;
     std::vector<uint16_t> m_pins;
+    std::map<int, std::fstream*> m_gpioValueFile;
+
 };
 
 #endif

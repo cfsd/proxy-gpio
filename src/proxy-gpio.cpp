@@ -43,6 +43,7 @@ Gpio::Gpio(bool VERBOSE, uint32_t id)
     , m_initialValuesDirections()
     , m_path()
     , m_pins()
+    , m_gpioValueFile()
 {
 	Gpio::setUp();
 }
@@ -172,6 +173,15 @@ void Gpio::OpenGpio()
       exportFile << pin;
       exportFile.flush();
       std::cout << "[GPIO] Exported pin: " << pin << std::endl;
+
+      std::string gpioValueFilename =  m_path + "/gpio" + std::to_string(pin) + "/value";
+      m_gpioValueFile[pin] = new std::fstream(gpioValueFilename, std::fstream::in | std::fstream::out);
+    if ((*m_gpioValueFile[pin]).is_open()) {
+    } else {
+      std::cout << "[GPIO] Could not open " << gpioValueFilename << "." << std::endl;
+    }
+
+
     }
     Reset();
   } else {
@@ -190,6 +200,7 @@ void Gpio::CloseGpio()
     for (auto pin : m_pins) {
       unexportFile << pin;
       unexportFile.flush();
+      m_gpioValueFile[pin]->close();
     }
   } else {
     std::cout << "[GPIO] Could not open " << filename << "." 
@@ -205,6 +216,7 @@ void Gpio::Reset()
     bool initialValue = m_initialValuesDirections[i].first;
     std::string initialDirection = m_initialValuesDirections[i].second;
     SetDirection(pin, initialDirection);
+
     if (initialDirection.compare("out") == 0) {
       SetValue(pin, initialValue);
     }
@@ -250,36 +262,42 @@ std::string Gpio::GetDirection(uint16_t const a_pin) const
 
 void Gpio::SetValue(uint16_t const a_pin, bool const a_value)
 {
-  std::string gpioValueFilename = 
-      m_path + "/gpio" + std::to_string(a_pin) + "/value";
+  //std::string gpioValueFilename =       m_path + "/gpio" + std::to_string(a_pin) + "/value";
 
-  std::ofstream gpioValueFile(gpioValueFilename, std::ofstream::out);
-  if (gpioValueFile.is_open()) {
-    gpioValueFile << static_cast<uint16_t>(a_value);
-    gpioValueFile.flush();
+  //std::ofstream gpioValueFile(gpioValueFilename, std::ofstream::out);
+  if ((*m_gpioValueFile[a_pin]).is_open()) {
+    (*m_gpioValueFile[a_pin]).seekp(0);
+    (*m_gpioValueFile[a_pin]) << static_cast<uint16_t>(a_value);
+    (*m_gpioValueFile[a_pin]).flush();
   } else {
-    std::cout << "[GPIO] Could not open " << gpioValueFilename 
+    std::cout << "[GPIO] Could not open " << a_pin 
         << "." << std::endl;
   }
-  gpioValueFile.close();
 }
 
-bool Gpio::GetValue(uint16_t const a_pin) const
+bool Gpio::GetValue(uint16_t const a_pin)
 {
-  std::string gpioValueFilename = 
-      m_path + "/gpio" + std::to_string(a_pin) + "/value";
-  std::string line;
-
-  std::ifstream gpioValueFile(gpioValueFilename, std::ifstream::in);
-  if (gpioValueFile.is_open()) {
-    std::getline(gpioValueFile, line);
-    bool value = (std::stoi(line) == 1);
-    gpioValueFile.close();
+  //std::string gpioValueFilename = m_path + "/gpio" + std::to_string(a_pin) + "/value";
+  //std::string line;
+  char c;
+  //std::ifstream gpioValueFile(gpioValueFilename, std::ifstream::in);
+  if ((*m_gpioValueFile[a_pin]).is_open()) {
+    (*m_gpioValueFile[a_pin]).sync();
+    (*m_gpioValueFile[a_pin]).seekg(0);
+    if (m_debug){
+      std::cout << "[GPIO-READ] " << " Pin: " << a_pin << std::endl; 
+    }
+    //std::getline((*m_gpioValueFile[a_pin]), line);
+    //bool value = (std::stoi(line) == 1);
+    c = (*m_gpioValueFile[a_pin]).peek();
+    bool value = ((c - '0') == 1);
+    if (m_debug){
+      std::cout << "[GPIO-READ] Value: " << value << " Pin: " << a_pin << std::endl; 
+    }
     return value;
   } else {
-    std::cout << "[GPIO] Could not open " << gpioValueFilename 
+    std::cout << "[GPIO] Could not open " << a_pin 
         << "." << std::endl;
-    gpioValueFile.close();
     return NULL;
   }
 }
