@@ -38,8 +38,11 @@ class Gpio {
 
    public:
     float decode(const std::string &data) noexcept;
-    void callOnReceive(cluon::data::Envelope data);
+    //void callOnReceive(cluon::data::Envelope data);
     void body(cluon::OD4Session &od4);
+    void SetValue(uint16_t const, bool const);
+    uint32_t getSenderStampOffsetGpio();
+    bool getInitialised();
 
    private:
     void setUp();
@@ -50,7 +53,6 @@ class Gpio {
     void Reset();
     void SetDirection(uint16_t const, std::string);
     std::string GetDirection(uint16_t const) const;
-    void SetValue(uint16_t const, bool const);
     bool GetValue(uint16_t const);
 
     bool m_debug;

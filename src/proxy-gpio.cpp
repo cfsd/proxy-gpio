@@ -126,7 +126,7 @@ void Gpio::body(cluon::OD4Session &od4)
       }
     }
 }
-
+/*
 void Gpio::callOnReceive(cluon::data::Envelope data){
     if (!m_initialised) {
         return;
@@ -160,7 +160,7 @@ void Gpio::callOnReceive(cluon::data::Envelope data){
             << std::endl;
      }
 
-}
+}*/
 
 void Gpio::OpenGpio()
 {
@@ -263,6 +263,17 @@ std::string Gpio::GetDirection(uint16_t const a_pin) const
 
 void Gpio::SetValue(uint16_t const a_pin, bool const a_value)
 {
+    if (!m_initialised) {
+        return;
+    }
+
+    if (GetDirection(a_pin).compare("out") == 0) {
+    } else {
+      std::cout << "[GPIO-WRITE] The requested pin " << a_pin
+        << " is read-only." 
+        << std::endl;
+      return;
+    }
   //std::string gpioValueFilename =       m_path + "/gpio" + std::to_string(a_pin) + "/value";
 
   //std::ofstream gpioValueFile(gpioValueFilename, std::ofstream::out);
@@ -301,4 +312,12 @@ bool Gpio::GetValue(uint16_t const a_pin)
         << "." << std::endl;
     return NULL;
   }
+}
+
+
+uint32_t Gpio::getSenderStampOffsetGpio(){
+  return m_senderStampOffsetGpio;
+}
+bool Gpio::getInitialised(){
+  return m_initialised;
 }

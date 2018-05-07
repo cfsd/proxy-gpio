@@ -49,13 +49,7 @@ int32_t main(int32_t argc, char **argv) {
         Gpio gpio(VERBOSE, ID);
 
         cluon::data::Envelope data;
-        cluon::OD4Session od4{static_cast<uint16_t>(std::stoi(commandlineArguments["cid"])),
-            [&data, &gp = gpio](cluon::data::Envelope &&envelope){
-
-                gp.callOnReceive(envelope);
-                // IMPORTANT INTRODUCE A MUTEX
-            }
-        };
+        cluon::OD4Session od4{static_cast<uint16_t>(std::stoi(commandlineArguments["cid"]))};
         
         // Interface to OxTS.
         const std::string ADDR("0.0.0.0");
@@ -82,6 +76,40 @@ int32_t main(int32_t argc, char **argv) {
             });
         //}
 
+        auto onSwitchStateRequest{[&gpio, &VERBOSE](cluon::data::Envelope &&envelope)
+        {   
+            if (!gpio.getInitialised()){
+                return;
+            }
+            auto const gpioState = cluon::extractMessage<opendlv::proxy::SwitchStateRequest>(std::move(envelope));
+            int16_t pin = envelope.senderStamp()-gpio.getSenderStampOffsetGpio();
+            bool value = gpioState.state();
+            gpio.SetValue(pin, value);
+
+            if (VERBOSE){
+                std::cout << "[GPIO-WRITE] Recieved request:\tpin: " << pin << "\tvalue: " << value << std::endl;
+            }
+        }};
+        od4.dataTrigger(opendlv::proxy::SwitchStateRequest::ID(), onSwitchStateRequest);
+        
+        if (VERBOSE){
+            auto onSwitchStateReading{[&gpio, &VERBOSE](cluon::data::Envelope &&envelope)
+                {
+                    if (!gpio.getInitialised()){
+                        return;
+                    }
+                    auto const gpioState = cluon::extractMessage<opendlv::proxy::SwitchStateReading>(std::move(envelope));
+                    int16_t pin = envelope.senderStamp()-gpio.getSenderStampOffsetGpio();
+                    bool value = gpioState.state();
+                    
+                            std::cout << "[GPIO-READ] The read pin: " << pin
+                                    << " state:"
+                                    << value
+                                    << std::endl;
+            }};
+            od4.dataTrigger(opendlv::proxy::PedalPositionRequest::ID(), onSwitchStateReading);
+        }
+        
         auto atFrequency{[&od4, &gpio]() -> bool
         {            
             gpio.body(od4);
