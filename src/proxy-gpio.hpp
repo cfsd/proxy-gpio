@@ -60,7 +60,8 @@ class Gpio {
     std::vector<std::pair<bool, std::string>> m_initialValuesDirections;
     std::string m_path;
     std::vector<uint16_t> m_pins;
-    std::map<int, std::fstream*> m_gpioValueFile;
+    std::map<int, std::ifstream*> m_gpioValueFileIn;
+    std::map<int, std::ofstream*> m_gpioValueFileOut;
 
 };
 
