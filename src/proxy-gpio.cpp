@@ -26,8 +26,8 @@
 // #include <array>
 // #include <sstream>
 #include <string>
-#include <ctime>
-#include <chrono>
+//#include <ctime>
+//#include <chrono>
 
 float Gpio::decode(const std::string &data) noexcept {
     float temp = std::stof(data);
@@ -105,16 +105,14 @@ void Gpio::tearDown()
 void Gpio::body(cluon::OD4Session &od4)
 {
 
+
+    cluon::data::TimeStamp sampleTime = cluon::time::now();
+    opendlv::proxy::SwitchStateReading msg;
+
     for (auto pin : m_pins) {
         bool pinState = GetValue(pin);
-
-        std::chrono::system_clock::time_point tp = std::chrono::system_clock::now();
-        cluon::data::TimeStamp sampleTime = cluon::time::convert(tp);
-
         int16_t senderStamp = (int16_t) pin + m_senderStampOffsetGpio;
-        opendlv::proxy::SwitchStateReading msg;
         msg.state(pinState);
-
         od4.send(msg, sampleTime, senderStamp);
 
     }
