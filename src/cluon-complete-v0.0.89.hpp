@@ -1,6 +1,6 @@
 // This is an auto-generated header-only single-file distribution of libcluon.
-// Date: Tue, 01 May 2018 10:35:56 +0200
-// Version: 0.0.80
+// Date: Mon, 07 May 2018 12:05:07 +0200
+// Version: 0.0.89
 //
 //
 // Implementation of N4562 std::experimental::any (merged into C++17) for C++11 compilers.
@@ -264,7 +264,10 @@ private: // Storage and Virtual Method Table
 
         static void swap(storage_union& lhs, storage_union& rhs) noexcept
         {
-            std::swap(reinterpret_cast<T&>(lhs.stack), reinterpret_cast<T&>(rhs.stack));
+            storage_union tmp_storage;
+            move(rhs, tmp_storage);
+            move(lhs, rhs);
+            move(tmp_storage, lhs);
         }
     };
 
@@ -4999,9 +5002,8 @@ class LIBCLUON_API MessageParser {
 
 //#include "cluon/cluon.hpp"
 
-#include <signal.h>
-
 #include <atomic>
+#include <csignal>
 
 namespace cluon {
 
@@ -5288,13 +5290,19 @@ class LIBCLUON_API UDPReceiver {
     struct sockaddr_in m_receiveFromAddress {};
     struct ip_mreq m_mreq {};
     bool m_isMulticast{false};
+
     std::atomic<bool> m_readFromSocketThreadRunning{false};
     std::thread m_readFromSocketThread{};
 
+   private:
+    std::function<void(std::string &&, std::string &&, std::chrono::system_clock::time_point)> m_delegate{};
+
+   private:
     std::atomic<bool> m_pipelineThreadRunning{false};
     std::thread m_pipelineThread{};
     std::mutex m_pipelineMutex{};
     std::condition_variable m_pipelineCondition{};
+
     class PipelineEntry {
        public:
         std::string m_data;
@@ -5302,8 +5310,6 @@ class LIBCLUON_API UDPReceiver {
         std::chrono::system_clock::time_point m_sampleTime;
     };
     std::deque<PipelineEntry> m_pipeline{};
-
-    std::function<void(std::string &&, std::string &&, std::chrono::system_clock::time_point)> m_delegate{};
 };
 } // namespace cluon
 
@@ -5446,8 +5452,10 @@ class LIBCLUON_API TCPConnection {
     mutable std::mutex m_socketMutex{};
     int32_t m_socket{-1};
     struct sockaddr_in m_address {};
+
     std::atomic<bool> m_readFromSocketThreadRunning{false};
     std::thread m_readFromSocketThread{};
+
     std::function<void(std::string &&, std::chrono::system_clock::time_point)> m_newDataDelegate{};
     std::function<void()> m_connectionLostDelegate{};
 };
@@ -6260,6 +6268,7 @@ class LIBCLUON_API FromJSONVisitor {
 #ifndef CLUON_TOJSONVISITOR_HPP
 #define CLUON_TOJSONVISITOR_HPP
 
+//#include "cluon/any/any.hpp"
 //#include "cluon/cluon.hpp"
 
 #include <cstdint>
@@ -6329,9 +6338,12 @@ class LIBCLUON_API ToJSONVisitor {
     void visit(uint32_t &id, std::string &&typeName, std::string &&name, T &value) noexcept {
         (void)typeName;
         if ((0 == m_mask.count(id)) || m_mask[id]) {
-            ToJSONVisitor jsonVisitor;
-            value.accept(jsonVisitor);
-            m_buffer << '\"' << name << '\"' << ':' << jsonVisitor.json() << ',' << '\n';
+            try {
+                ToJSONVisitor jsonVisitor;
+                value.accept(jsonVisitor);
+                m_buffer << '\"' << name << '\"' << ':' << jsonVisitor.json() << ',' << '\n';
+            } catch (const linb::bad_any_cast &) { // LCOV_EXCL_LINE
+            }
         }
     }
 
@@ -6814,7 +6826,6 @@ class LIBCLUON_API ToMsgPackVisitor {
 //#include "cluon/ToProtoVisitor.hpp"
 //#include "cluon/cluonDataStructures.hpp"
 
-#include <array>
 #include <cstring>
 #include <istream>
 #include <sstream>
@@ -6834,24 +6845,30 @@ namespace cluon {
 inline std::string serializeEnvelope(cluon::data::Envelope &&envelope) noexcept {
     std::string dataToSend;
     {
+        std::stringstream sstr;
+
         cluon::ToProtoVisitor protoEncoder;
         envelope.accept(protoEncoder);
 
         const std::string tmp{protoEncoder.encodedData()};
         uint32_t length{static_cast<uint32_t>(tmp.size())};
+        length <<= 8;
         length = htole32(length);
 
-        // Add OpenDaVINCI header.
-        std::array<char, 5> header;
-        header[0] = static_cast<char>(0x0D);
-        header[1] = static_cast<char>(0xA4);
-        header[2] = *(reinterpret_cast<char *>(&length) + 0);
-        header[3] = *(reinterpret_cast<char *>(&length) + 1);
-        header[4] = *(reinterpret_cast<char *>(&length) + 2);
+        // Add OD4 header.
+        constexpr unsigned char OD4_HEADER_BYTE0 = 0x0D;
+        constexpr unsigned char OD4_HEADER_BYTE1 = 0xA4;
+        sstr.put(static_cast<char>(OD4_HEADER_BYTE0));
+        auto posByte1 = sstr.tellp();
+        sstr.write(reinterpret_cast<char *>(&length), static_cast<std::streamsize>(sizeof(uint32_t)));
+        auto posByte5 = sstr.tellp();
+        sstr.seekp(posByte1);
+        sstr.put(static_cast<char>(OD4_HEADER_BYTE1));
+        sstr.seekp(posByte5);
 
-        std::stringstream sstr;
-        sstr.write(header.data(), static_cast<std::streamsize>(header.size()));
+        // Write payload.
         sstr.write(tmp.data(), static_cast<std::streamsize>(tmp.size()));
+
         dataToSend = sstr.str();
     }
     return dataToSend;
@@ -8052,7 +8069,9 @@ class LIBCLUON_API Player {
 //#include "cluon/cluon.hpp"
 
 // clang-format off
-#ifndef WIN32
+#ifdef WIN32
+    #include <Windows.h>
+#else
     #include <pthread.h>
 #endif
 // clang-format on
@@ -8074,8 +8093,9 @@ class LIBCLUON_API SharedMemory {
     /**
      * Constructor.
      *
-     * @param name Name of the shared memory area; must start with / and must not be longer than NAME_MAX (255). If the name is missing a leading '/' or is
-     * longer than 255, it will be adjusted accordingly.
+     * @param name Name of the shared memory area; must start with / and must not
+     * be longer than NAME_MAX (255) on POSIX or PATH_MAX on WIN32. If the name
+     * is missing a leading '/' or is longer than 255, it will be adjusted accordingly.
      * @param size of the shared memory area to create; if size is 0, the class tries to attach to an existing area.
      */
     SharedMemory(const std::string &name, uint32_t size = 0) noexcept;
@@ -8122,14 +8142,18 @@ class LIBCLUON_API SharedMemory {
     bool valid() noexcept;
 
    private:
-    int32_t m_fd{-1};
     std::string m_name{""};
     uint32_t m_size{0};
     char *m_sharedMemory{nullptr};
     char *m_userAccessibleSharedMemory{nullptr};
     bool m_hasOnlyAttachedToSharedMemory{false};
 
-#ifndef WIN32
+#ifdef WIN32
+    HANDLE __conditionEvent{nullptr};
+    HANDLE __mutex{nullptr};
+    HANDLE __sharedMemory{nullptr};
+#else
+    int32_t m_fd{-1};
     struct SharedMemoryHeader {
         uint32_t __size;
         pthread_mutex_t __mutex;
@@ -8790,7 +8814,7 @@ inline std::pair<std::vector<MetaMessage>, MessageParser::MessageParserErrorCode
     std::pair<std::vector<MetaMessage>, MessageParserErrorCodes> retVal{};
     std::string inputWithoutComments{input};
     try {
-        const std::string MATCH_COMMENTS_REGEX = R"((//.*)|/\*([^*]|[\r\n]|(\*+([^*/]|[\r\n])))*\*+/)";
+        const std::string MATCH_COMMENTS_REGEX = R"(/\*([\s\S]*?)\*/|//.*)";
         inputWithoutComments                   = std::regex_replace(input, std::regex(MATCH_COMMENTS_REGEX), ""); // NOLINT
     } catch (std::regex_error &) {                                                                                // LCOV_EXCL_LINE
     } catch (std::bad_cast &) {                                                                                   // LCOV_EXCL_LINE
@@ -9846,9 +9870,6 @@ inline uint64_t ToProtoVisitor::encodeKey(uint32_t fieldIdentifier, uint8_t prot
 }
 
 inline std::size_t ToProtoVisitor::toVarInt(std::ostream &out, uint64_t v) noexcept {
-    // VarInt is little endian.
-    v = htole64(v);
-
     // Minimum size is of the encoded data.
     std::size_t size{1};
     uint8_t b{0};
@@ -9998,19 +10019,27 @@ inline uint64_t FromProtoVisitor::ProtoKeyValue::valueAsVarInt() const noexcept 
 }
 
 inline float FromProtoVisitor::ProtoKeyValue::valueAsFloat() const noexcept {
-    float retVal{0};
+    union FloatValue {
+        uint32_t uint32Value;
+        float floatValue{0};
+    } retVal;
     if (!m_value.empty() && (length() == sizeof(float)) && (m_value.size() == sizeof(float)) && (type() == ProtoConstants::FOUR_BYTES)) {
-        std::memmove(&retVal, &m_value[0], sizeof(float));
+        std::memmove(&retVal.uint32Value, &m_value[0], sizeof(float));
+        retVal.uint32Value = le32toh(retVal.uint32Value);
     }
-    return retVal;
+    return retVal.floatValue;
 }
 
 inline double FromProtoVisitor::ProtoKeyValue::valueAsDouble() const noexcept {
-    double retVal{0};
+    union DoubleValue {
+        uint64_t uint64Value;
+        double doubleValue{0};
+    } retVal;
     if (!m_value.empty() && (length() == sizeof(double)) && (m_value.size() == sizeof(double)) && (type() == ProtoConstants::EIGHT_BYTES)) {
-        std::memmove(&retVal, &m_value[0], sizeof(double));
+        std::memmove(&retVal.uint64Value, &m_value[0], sizeof(double));
+        retVal.uint64Value = le64toh(retVal.uint64Value);
     }
-    return retVal;
+    return retVal.doubleValue;
 }
 
 inline std::string FromProtoVisitor::ProtoKeyValue::valueAsString() const noexcept {
@@ -10192,8 +10221,6 @@ inline std::size_t FromProtoVisitor::fromVarInt(std::istream &in, uint64_t &valu
         }
     }
 
-    // VarInt is little endian.
-    value = le64toh(value);
     return size;
 }
 } // namespace cluon
@@ -11784,22 +11811,22 @@ inline std::string ToJSONVisitor::encodeBase64(const std::string &input) const n
         value = static_cast<uint32_t>(input.at(index++)) << 16;
         value |= static_cast<uint32_t>(input.at(index++)) << 8;
         value |= static_cast<uint32_t>(input.at(index++));
-        retVal += ALPHABET.at(value >> 18 & 63);
+        retVal += ALPHABET.at((value >> 18) & 63);
         retVal += ALPHABET.at((value >> 12) & 63);
         retVal += ALPHABET.at((value >> 6) & 63);
-        retVal += ALPHABET.at((value)&63);
+        retVal += ALPHABET.at(value & 63);
         length -= 3;
     }
     if (length == 2) {
         value = static_cast<uint32_t>(input.at(index++)) << 16;
         value |= static_cast<uint32_t>(input.at(index++)) << 8;
-        retVal += ALPHABET.at(value >> 18 & 63);
+        retVal += ALPHABET.at((value >> 18) & 63);
         retVal += ALPHABET.at((value >> 12) & 63);
         retVal += ALPHABET.at((value >> 6) & 63);
         retVal += "=";
     } else if (length == 1) {
         value = static_cast<uint32_t>(input.at(index++)) << 16;
-        retVal += ALPHABET.at(value >> 18 & 63);
+        retVal += ALPHABET.at((value >> 18) & 63);
         retVal += ALPHABET.at((value >> 12) & 63);
         retVal += "==";
     }
@@ -12907,6 +12934,7 @@ inline void ToODVDVisitor::visit(uint32_t id, std::string &&typeName, std::strin
 //#include "cluon/MessageParser.hpp"
 //#include "cluon/ToJSONVisitor.hpp"
 //#include "cluon/ToProtoVisitor.hpp"
+//#include "cluon/any/any.hpp"
 
 #include <algorithm>
 #include <sstream>
@@ -12994,7 +13022,7 @@ inline std::string EnvelopeConverter::getJSONFromEnvelope(cluon::data::Envelope 
             try {
                 // Catch possible linb::any exception.
                 gm.accept(payloadToJSON);
-            } catch (...) {} // LCOV_EXCL_LINE
+            } catch (const linb::bad_any_cast &) {} // LCOV_EXCL_LINE
 
             std::string tmp{payload.messageName()};
             std::replace(tmp.begin(), tmp.end(), '.', '_');
@@ -13517,7 +13545,9 @@ inline float Player::checkRefillingCache(const uint32_t &numberOfEntries, float 
 //#include "cluon/SharedMemory.hpp"
 
 // clang-format off
-#ifndef WIN32
+#ifdef WIN32
+    #include <limits>
+#else
     #include <fcntl.h>
     #include <sys/mman.h>
     #include <sys/stat.h>
@@ -13533,7 +13563,11 @@ namespace cluon {
 inline SharedMemory::SharedMemory(const std::string &name, uint32_t size) noexcept
     : m_size(size) {
     if (!name.empty()) {
+#ifdef WIN32
+        constexpr int MAX_LENGTH_NAME{MAX_PATH};
+#else
         constexpr int MAX_LENGTH_NAME{254};
+#endif
         const std::string n{name.substr(0, (name.size() > MAX_LENGTH_NAME ? MAX_LENGTH_NAME : name.size()))};
         if ('/' != n[0]) {
             m_name = "/";
@@ -13542,6 +13576,143 @@ inline SharedMemory::SharedMemory(const std::string &name, uint32_t size) noexce
         if (m_name.size() > MAX_LENGTH_NAME) {
             m_name = m_name.substr(0, MAX_LENGTH_NAME);
         }
+
+#ifdef WIN32
+        std::string mutexName = m_name;
+        if (mutexName.size() > MAX_LENGTH_NAME) {
+            mutexName = mutexName.substr(0, MAX_LENGTH_NAME - 6);
+        }
+        const std::string conditionEventName = mutexName + "_event";
+        mutexName += "_mutex";
+
+        if (0 < size) {
+            // Create a shared memory area and semaphores.
+            const LONG MUTEX_INITIAL_COUNT = 1;
+            const LONG MUTEX_MAX_COUNT     = 1;
+            const DWORD FLAGS              = 0; // Reserved.
+            __mutex                        = CreateSemaphoreEx(NULL, MUTEX_INITIAL_COUNT, MUTEX_MAX_COUNT, mutexName.c_str(), FLAGS, SEMAPHORE_ALL_ACCESS);
+            if (nullptr != __mutex) {
+                __conditionEvent = CreateEvent(
+                    NULL /*use default security*/, TRUE /*manually resetting event*/, FALSE /*initial state is not signaled*/, conditionEventName.c_str());
+                if (nullptr != __conditionEvent) {
+                    __sharedMemory = CreateFileMapping(INVALID_HANDLE_VALUE /*use paging file*/,
+                                                       NULL /*use default security*/,
+                                                       PAGE_READWRITE,
+                                                       0,
+                                                       m_size + sizeof(uint32_t) /*size + size-information (uint32_t)*/,
+                                                       m_name.c_str());
+                    if (nullptr != __sharedMemory) {
+                        m_sharedMemory = (char *)MapViewOfFile(__sharedMemory, FILE_MAP_ALL_ACCESS, 0, 0, m_size + sizeof(uint32_t));
+                        if (nullptr != m_sharedMemory) {
+                            // Provide size information at the beginning of the shared memory.
+                            *(uint32_t *)m_sharedMemory  = m_size;
+                            m_userAccessibleSharedMemory = m_sharedMemory + sizeof(uint32_t);
+                        } else {
+                            std::cerr << "[cluon::SharedMemory] Failed to map shared memory '" << m_name << "': "
+                                      << " (" << GetLastError() << ")" << std::endl;
+                            CloseHandle(__sharedMemory);
+                            __sharedMemory = nullptr;
+
+                            CloseHandle(__conditionEvent);
+                            __conditionEvent = nullptr;
+
+                            CloseHandle(__mutex);
+                            __mutex = nullptr;
+                        }
+                    } else {
+                        std::cerr << "[cluon::SharedMemory] Failed to request shared memory '" << m_name << "': "
+                                  << " (" << GetLastError() << ")" << std::endl;
+                        CloseHandle(__conditionEvent);
+                        __conditionEvent = nullptr;
+
+                        CloseHandle(__mutex);
+                        __mutex = nullptr;
+                    }
+                } else {
+                    std::cerr << "[cluon::SharedMemory] Failed to request event '" << conditionEventName << "': "
+                              << " (" << GetLastError() << ")" << std::endl;
+                    CloseHandle(__conditionEvent);
+                    __conditionEvent = nullptr;
+
+                    CloseHandle(__mutex);
+                    __mutex = nullptr;
+                }
+            } else {
+                std::cerr << "[cluon::SharedMemory] Failed to create mutex '" << mutexName << "': "
+                          << " (" << GetLastError() << ")" << std::endl;
+                CloseHandle(__mutex);
+                __mutex = nullptr;
+            }
+        } else {
+            // Open a shared memory area and semaphores.
+            m_hasOnlyAttachedToSharedMemory = true;
+            const BOOL INHERIT_HANDLE       = FALSE;
+            __mutex                         = OpenSemaphore(SEMAPHORE_ALL_ACCESS, INHERIT_HANDLE, mutexName.c_str());
+            if (nullptr != __mutex) {
+                __conditionEvent = OpenEvent(EVENT_ALL_ACCESS, FALSE /*do not inherit the name*/, conditionEventName.c_str());
+                if (nullptr != __conditionEvent) {
+                    __sharedMemory = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE /*do not inherit the name*/, m_name.c_str());
+                    if (nullptr != __sharedMemory) {
+                        // Firstly, map only for the size of a uint32_t to read the entire size.
+                        m_sharedMemory = (char *)MapViewOfFile(__sharedMemory, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(uint32_t));
+                        if (nullptr != m_sharedMemory) {
+                            //  Now, read the real size...
+                            m_size = *(uint32_t *)m_sharedMemory;
+                            // ..unmap and re-map.
+                            UnmapViewOfFile(m_sharedMemory);
+                            m_sharedMemory = (char *)MapViewOfFile(__sharedMemory, FILE_MAP_ALL_ACCESS, 0, 0, m_size + sizeof(uint32_t));
+                            if (nullptr != m_sharedMemory) {
+                                m_userAccessibleSharedMemory = m_sharedMemory + sizeof(uint32_t);
+                            } else {
+                                std::cerr << "[cluon::SharedMemory] Failed to finally map shared memory '" << m_name << "': "
+                                          << " (" << GetLastError() << ")" << std::endl;
+                                CloseHandle(__sharedMemory);
+                                __sharedMemory = nullptr;
+
+                                CloseHandle(__conditionEvent);
+                                __conditionEvent = nullptr;
+
+                                CloseHandle(__mutex);
+                                __mutex = nullptr;
+                            }
+                        } else {
+                            std::cerr << "[cluon::SharedMemory] Failed to temporarily map shared memory '" << m_name << "': "
+                                      << " (" << GetLastError() << ")" << std::endl;
+                            CloseHandle(__sharedMemory);
+                            __sharedMemory = nullptr;
+
+                            CloseHandle(__conditionEvent);
+                            __conditionEvent = nullptr;
+
+                            CloseHandle(__mutex);
+                            __mutex = nullptr;
+                        }
+                    } else {
+                        std::cerr << "[cluon::SharedMemory] Failed to open shared memory '" << m_name << "': "
+                                  << " (" << GetLastError() << ")" << std::endl;
+                        CloseHandle(__conditionEvent);
+                        __conditionEvent = nullptr;
+
+                        CloseHandle(__mutex);
+                        __mutex = nullptr;
+                    }
+                } else {
+                    std::cerr << "[cluon::SharedMemory] Failed to open event '" << conditionEventName << "': "
+                              << " (" << GetLastError() << ")" << std::endl;
+                    CloseHandle(__conditionEvent);
+                    __conditionEvent = nullptr;
+
+                    CloseHandle(__mutex);
+                    __mutex = nullptr;
+                }
+            } else {
+                std::cerr << "[cluon::SharedMemory] Failed to open mutex '" << mutexName << "': "
+                          << " (" << GetLastError() << ")" << std::endl;
+                CloseHandle(__mutex);
+                __mutex = nullptr;
+            }
+        }
+#endif
 
 #ifndef WIN32
         // If size is greater than 0, the caller wants to create a new shared
@@ -13667,7 +13838,22 @@ inline SharedMemory::SharedMemory(const std::string &name, uint32_t size) noexce
 }
 
 inline SharedMemory::~SharedMemory() noexcept {
-#ifndef WIN32
+#ifdef WIN32
+    if (nullptr != __conditionEvent) {
+        SetEvent(__conditionEvent);
+        CloseHandle(__conditionEvent);
+    }
+    if (nullptr != __mutex) {
+        unlock();
+        CloseHandle(__mutex);
+    }
+    if (nullptr != m_sharedMemory) {
+        UnmapViewOfFile(m_sharedMemory);
+    }
+    if (nullptr != __sharedMemory) {
+        CloseHandle(__sharedMemory);
+    }
+#else
     if ((nullptr != m_sharedMemoryHeader) && (!m_hasOnlyAttachedToSharedMemory)) {
         // Wake any waiting threads as we are going to end the shared memory session.
         ::pthread_cond_broadcast(&(m_sharedMemoryHeader->__condition));
@@ -13684,7 +13870,11 @@ inline SharedMemory::~SharedMemory() noexcept {
 }
 
 inline void SharedMemory::lock() noexcept {
-#ifndef WIN32
+#ifdef WIN32
+    if (nullptr != __mutex) {
+        WaitForSingleObject(__mutex, INFINITE);
+    }
+#else
     if (nullptr != m_sharedMemoryHeader) {
         if (EOWNERDEAD == ::pthread_mutex_lock(&(m_sharedMemoryHeader->__mutex))) {
             std::cerr << "[cluon::SharedMemory] pthread_mutex_lock returned for EOWNERDEAD for mutex in shared memory '" << m_name // LCOV_EXCL_LINE
@@ -13696,7 +13886,12 @@ inline void SharedMemory::lock() noexcept {
 }
 
 inline void SharedMemory::unlock() noexcept {
-#ifndef WIN32
+#ifdef WIN32
+    if (nullptr != __mutex) {
+        const LONG RELEASE_COUNT = 1;
+        ReleaseSemaphore(__mutex, RELEASE_COUNT, 0);
+    }
+#else
     if (nullptr != m_sharedMemoryHeader) {
         ::pthread_mutex_unlock(&(m_sharedMemoryHeader->__mutex));
     }
@@ -13704,7 +13899,11 @@ inline void SharedMemory::unlock() noexcept {
 }
 
 inline void SharedMemory::wait() noexcept {
-#ifndef WIN32
+#ifdef WIN32
+    if (nullptr != __conditionEvent) {
+        WaitForSingleObject(__conditionEvent, INFINITE);
+    }
+#else
     if (nullptr != m_sharedMemoryHeader) {
         lock();
         ::pthread_cond_wait(&(m_sharedMemoryHeader->__condition), &(m_sharedMemoryHeader->__mutex));
@@ -13714,7 +13913,12 @@ inline void SharedMemory::wait() noexcept {
 }
 
 inline void SharedMemory::notifyAll() noexcept {
-#ifndef WIN32
+#ifdef WIN32
+    if (nullptr != __conditionEvent) {
+        SetEvent(__conditionEvent);
+        ResetEvent(__conditionEvent);
+    }
+#else
     if (nullptr != m_sharedMemoryHeader) {
         ::pthread_cond_broadcast(&(m_sharedMemoryHeader->__condition));
     }
@@ -13734,7 +13938,10 @@ inline const std::string SharedMemory::name() const noexcept {
 }
 
 inline bool SharedMemory::valid() noexcept {
-    bool valid{-1 != m_fd};
+    bool valid{true};
+#ifndef WIN32
+    valid &= (-1 != m_fd);
+#endif
     valid &= (nullptr != m_sharedMemory);
 #ifndef WIN32
     valid &= (MAP_FAILED != m_sharedMemory);
@@ -15376,6 +15583,9 @@ void MetaMessageToProtoTransformator::visit(const MetaMessage &mm) noexcept {
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifndef CLUON_MSC_HPP
+#define CLUON_MSC_HPP
+
 //#include "cluon/MessageParser.hpp"
 //#include "cluon/MetaMessage.hpp"
 //#include "cluon/MetaMessageToCPPTransformator.hpp"
@@ -15388,7 +15598,7 @@ void MetaMessageToProtoTransformator::visit(const MetaMessage &mm) noexcept {
 #include <sstream>
 #include <string>
 
-int main(int argc, char **argv) {
+inline int32_t cluon_msc(int32_t argc, char **argv) {
     const std::string PROGRAM{argv[0]}; // NOLINT
     argh::parser commandline(argc, argv);
 
@@ -15461,8 +15671,8 @@ int main(int argc, char **argv) {
                 outputFile << content << std::endl;
                 outputFile.close();
             }
-            else {
-                std::cout << content << std::endl;
+            else { // LCOV_EXCL_LINE
+                std::cout << content << std::endl; // LCOV_EXCL_LINE
             }
         }
     }
@@ -15471,6 +15681,35 @@ int main(int argc, char **argv) {
     }
 
     return retVal;
+}
+
+#endif
+/*
+ * Copyright (C) 2017-2018  Christian Berger
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// This test for a compiler definition is necessary to preserve single-file, header-only compability.
+#ifndef HAVE_CLUON_MSC
+#include "cluon-msc.hpp"
+#endif
+
+#include <cstdint>
+
+int32_t main(int32_t argc, char **argv) {
+    return cluon_msc(argc, argv);
 }
 #endif
 #ifdef HAVE_CLUON_REPLAY
@@ -15491,6 +15730,9 @@ int main(int argc, char **argv) {
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifndef CLUON_REPLAY_HPP
+#define CLUON_REPLAY_HPP
+
 //#include "cluon/cluon.hpp"
 //#include "cluon/Envelope.hpp"
 //#include "cluon/OD4Session.hpp"
@@ -15506,7 +15748,7 @@ int main(int argc, char **argv) {
 #include <string>
 #include <thread>
 
-int main(int argc, char **argv) {
+inline int32_t cluon_replay(int32_t argc, char **argv, bool monitorSTDIN) {
     int32_t retCode{0};
     const std::string PROGRAM{argv[0]}; // NOLINT
     auto commandlineArguments = cluon::getCommandlineArguments(argc, argv);
@@ -15535,21 +15777,23 @@ int main(int argc, char **argv) {
             std::atomic<bool> playCommandUpdate{false};
             std::mutex playerCommandMutex;
             cluon::data::PlayerCommand playerCommand;
-            std::thread t([&playCommandUpdate, &playerCommandMutex, &playerCommand](){
-                while (std::cin.good()) {
-                    auto tmp{cluon::extractEnvelope(std::cin)};
-                    if (tmp.first) {
-                        if (tmp.second.dataType() == cluon::data::PlayerCommand::ID()) {
-                            cluon::data::PlayerCommand pc = cluon::extractMessage<cluon::data::PlayerCommand>(std::move(tmp.second));
-                            {
-                                std::lock_guard<std::mutex> lck(playerCommandMutex);
-                                playerCommand = pc;
+            if (monitorSTDIN) {
+                std::thread t([&playCommandUpdate, &playerCommandMutex, &playerCommand](){
+                    while (std::cin.good()) {
+                        auto tmp{cluon::extractEnvelope(std::cin)};
+                        if (tmp.first) {
+                            if (tmp.second.dataType() == cluon::data::PlayerCommand::ID()) {
+                                cluon::data::PlayerCommand pc = cluon::extractMessage<cluon::data::PlayerCommand>(std::move(tmp.second));
+                                {
+                                    std::lock_guard<std::mutex> lck(playerCommandMutex);
+                                    playerCommand = pc;
+                                }
+                                playCommandUpdate = true;
                             }
-                            playCommandUpdate = true;
                         }
                     }
-                }
-            });
+                });
+            }
 
             // Listen for PlayerStatus updates.
             std::atomic<bool> playerStatusUpdate{false};
@@ -15678,16 +15922,49 @@ int main(int argc, char **argv) {
                         std::this_thread::sleep_for(std::chrono::duration<int32_t, std::micro>(player.delay()));
                     }
                 }
-                else {
-                    std::this_thread::sleep_for(std::chrono::duration<int32_t, std::milli>(100));
+                else { // LCOV_EXCL_LINE
+                    std::this_thread::sleep_for(std::chrono::duration<int32_t, std::milli>(100)); // LCOV_EXCL_LINE
                 }
             }
+            retCode = 0;
         }
         else {
             std::cerr << PROGRAM << ": file '" << recFile << "' not found." << std::endl;
+            retCode = 1;
         }
     }
     return retCode;
+}
+
+#endif
+
+/*
+ * Copyright (C) 2018  Christian Berger
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// This test for a compiler definition is necessary to preserve single-file, header-only compability.
+#ifndef HAVE_CLUON_REPLAY
+#include "cluon-replay.hpp"
+#endif
+
+#include <cstdint>
+
+int32_t main(int32_t argc, char **argv) {
+    constexpr bool monitorSTDIN{true};
+    return cluon_replay(argc, argv, monitorSTDIN);
 }
 #endif
 #ifdef HAVE_CLUON_LIVEFEED
@@ -15708,12 +15985,16 @@ int main(int argc, char **argv) {
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifndef CLUON_LIVEFEED_HPP
+#define CLUON_LIVEFEED_HPP
+
 //#include "cluon/cluon.hpp"
 //#include "cluon/MetaMessage.hpp"
 //#include "cluon/MessageParser.hpp"
 //#include "cluon/OD4Session.hpp"
 
 #include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -15730,19 +16011,15 @@ enum Color {
     DEFAULT = 39,
 };
 
-void clearScreen();
-void writeText(Color c, uint8_t y, uint8_t x, const std::string &text);
-std::string formatTimeStamp(const cluon::data::TimeStamp &ts);
-
-void clearScreen() {
+inline void clearScreen() {
     std::cout << "\033[2J" << std::endl;
 }
 
-void writeText(Color c, uint8_t y, uint8_t x, const std::string &text) {
+inline void writeText(Color c, uint8_t y, uint8_t x, const std::string &text) {
     std::cout << "\033[" << +y << ";" << +x << "H" << "\033[0;" << +c << "m" << text << "\033[0m" << std::endl;
 }
 
-std::string formatTimeStamp(const cluon::data::TimeStamp &ts) {
+inline std::string formatTimeStamp(const cluon::data::TimeStamp &ts) {
     std::time_t temp = static_cast<std::time_t>(ts.seconds());
     std::tm* t = std::gmtime(&temp);
     std::stringstream sstr;
@@ -15751,7 +16028,7 @@ std::string formatTimeStamp(const cluon::data::TimeStamp &ts) {
     return str;
 }
 
-int main(int argc, char **argv) {
+inline int32_t cluon_livefeed(int32_t argc, char **argv) {
     int retVal{1};
     const std::string PROGRAM{argv[0]}; // NOLINT
     auto commandlineArguments = cluon::getCommandlineArguments(argc, argv);
@@ -15826,14 +16103,46 @@ int main(int argc, char **argv) {
             }
         });
 
-        using namespace std::literals::chrono_literals; // NOLINT
-        while (od4Session.isRunning()) {
-            std::this_thread::sleep_for(1s);
-        }
+        if (od4Session.isRunning()) {
+            using namespace std::literals::chrono_literals; // NOLINT
+            while (od4Session.isRunning()) {
+                std::this_thread::sleep_for(1s);
+            }
 
-        retVal = 0;
+            retVal = 0;
+        }
     }
     return retVal;
+}
+
+#endif
+
+/*
+ * Copyright (C) 2018  Christian Berger
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// This test for a compiler definition is necessary to preserve single-file, header-only compability.
+#ifndef HAVE_CLUON_LIVEFEED
+#include "cluon-livefeed.hpp"
+#endif
+
+#include <cstdint>
+
+int32_t main(int32_t argc, char **argv) {
+    return cluon_livefeed(argc, argv);
 }
 #endif
 #ifdef HAVE_CLUON_REC2CSV
@@ -15854,6 +16163,9 @@ int main(int argc, char **argv) {
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifndef CLUON_REC2CSV_HPP
+#define CLUON_REC2CSV_HPP
+
 //#include "cluon/cluon.hpp"
 //#include "cluon/GenericMessage.hpp"
 //#include "cluon/MessageParser.hpp"
@@ -15871,7 +16183,7 @@ int main(int argc, char **argv) {
 #include <string>
 #include <thread>
 
-int32_t main(int32_t argc, char **argv) {
+inline int32_t cluon_rec2csv(int32_t argc, char **argv) {
     int32_t retCode{0};
     auto commandlineArguments = cluon::getCommandlineArguments(argc, argv);
     if ( (0 == commandlineArguments.count("rec")) || (0 == commandlineArguments.count("odvd")) ) {
@@ -15896,7 +16208,7 @@ int32_t main(int32_t argc, char **argv) {
             }
             else {
                 std::cerr << argv[0] << ": Message specification '" << commandlineArguments["odvd"] << "' not found." << std::endl;
-                return retCode;
+                return retCode = 1;
             }
         }
 
@@ -15991,8 +16303,38 @@ int32_t main(int32_t argc, char **argv) {
         }
         else {
             std::cerr << argv[0] << ": Recording '" << commandlineArguments["rec"] << "' not found." << std::endl;
+            retCode = 1;
         }
     }
     return retCode;
+}
+
+#endif
+/*
+ * Copyright (C) 2018  Christian Berger
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+// This test for a compiler definition is necessary to preserve single-file, header-only compability.
+#ifndef HAVE_CLUON_REC2CSV
+#include "cluon-rec2csv.hpp"
+#endif
+
+#include <cstdint>
+
+int32_t main(int32_t argc, char **argv) {
+    return cluon_rec2csv(argc, argv);
 }
 #endif
