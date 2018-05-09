@@ -1,3 +1,7 @@
+name="proxy-lynx-gpio-v0.0.1"
+tag=$(git log -1 --pretty=%h)
+img="$name:$tag"
+echo $img
+docker build -t $img -f Dockerfile.armhf .
 
-docker build -t proxy-lynx-gpio-v0.0.1 -f Dockerfile.armhf .
-docker save  proxy-lynx-gpio-v0.0.1 > proxy-lynx-gpio-v0.0.1.tar
+docker save  $img > $img.tar
