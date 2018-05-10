@@ -109,12 +109,14 @@ void Gpio::body(cluon::OD4Session &od4)
     cluon::data::TimeStamp sampleTime = cluon::time::now();
     opendlv::proxy::SwitchStateReading msg;
 
-    for (auto pin : m_pins) {
-        bool pinState = GetValue(pin);
-        int16_t senderStamp = (int16_t) pin + m_senderStampOffsetGpio;
-        msg.state(pinState);
-        od4.send(msg, sampleTime, senderStamp);
-
+    for (uint16_t i = 0; i < m_pins.size(); i++) {
+        if((m_initialValuesDirections[i].second).compare("out") != 0){
+          uint16_t pin = m_pins[i];
+          bool pinState = GetValue(pin);
+          int16_t senderStamp = (int16_t) pin + m_senderStampOffsetGpio;
+          msg.state(pinState);
+          od4.send(msg, sampleTime, senderStamp);
+        }
     }
     if (false) {
       std::cout << "Number of pins: " << m_pins.size() << std::endl;

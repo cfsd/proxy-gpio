@@ -1,7 +1,41 @@
 version: '2'
 
 services:
-    beaglebone:
-        image: ${IMAGE}
+    pwm:
+        image: proxy-lynx-pwm-v0.0.1
+        privileged: true
         network_mode: "host"
-        command: "beaglebone --port=${PORT} --cid=${CID} --id=1 --verbose=1"
+        restart: always
+        logging:
+             driver: "none"
+        command: "pwm --port=8882 --cid=222 --id=1"
+#        command: "pwm --cid=111" 
+    analog:
+        image: proxy-lynx-analog-v0.0.1
+        privileged: true
+        network_mode: "host"
+        restart: always
+        logging:
+           driver: "none"
+        command: "analog --cid=221 --id=1 --freq=30"
+
+    gpio:
+        image: proxy-lynx-gpio-v0.0.1
+        privileged: true
+        network_mode: "host"
+        restart: always
+        logging:
+            driver: "none"
+        command: "gpio --port=8881 --cid=220 --id=1 --freq=15"
+    steering:
+        image: logic-lynx-steering-v0.0.1
+        network_mode: "host"
+        restart: always
+        command: "steering --port=8884 --cid=219 --cidgpio=220 --cidanalog=221 --cidpwm=222 --id=1 --freq=30 --pconst=10000 --iconst=0.5 --tolerance=0.1"
+
+#    state-machine:
+#        image: logic-lynx-state-machine-v0.0.1
+#        network_mode: "host"
+#        restart: always
+#        command: "state-machine --cid=111 --id=1 --freq=30"
+
