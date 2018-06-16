@@ -63,9 +63,9 @@ int32_t main(int32_t argc, char **argv) {
             bool value = gpioState.state();
             if (pin == 27){ //Heartbeat
                 errorCount = 0;
+            }else{
+                gpio.SetValue(pin, value);
             }
-            gpio.SetValue(pin, value);
-
             if (VERBOSE){
                 std::cout << "[GPIO-WRITE] Recieved request:\tpin: " << pin << "\tvalue: " << value << std::endl;
             }
