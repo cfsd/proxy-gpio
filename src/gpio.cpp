@@ -33,10 +33,10 @@
 int32_t main(int32_t argc, char **argv) {
     int32_t retCode{0};
     auto commandlineArguments = cluon::getCommandlineArguments(argc, argv);
-    if ( (0 == commandlineArguments.count("port")) || (0 == commandlineArguments.count("cid")) ) {
+    if ((0 == commandlineArguments.count("cid"))) {
         std::cerr << argv[0] << " is a module for reading and writing to GPIOs on the BeagleBone Black" << std::endl;
-        std::cerr << "Usage:   " << argv[0] << " --port=<udp port>--cid=<OpenDaVINCI session> [--id=<Identifier in case of multiple beaglebone units>] [--verbose]" << std::endl;
-        std::cerr << "Example: " << argv[0] << " --port=8881 --cid=220 --id=1 --verbose=1 --freq=30" << std::endl;
+        std::cerr << "Usage:   " << argv[0] << "--cid=<OpenDaVINCI session> [--id=<Identifier in case of multiple beaglebone units>] [--verbose]" << std::endl;
+        std::cerr << "Example: " << argv[0] << "--cid=220 --id=1 --verbose=1 --freq=30" << std::endl;
         retCode = 1;
     } else {
         const uint32_t ID{(commandlineArguments["id"].size() != 0) ? static_cast<uint32_t>(std::stoi(commandlineArguments["id"])) : 0};
@@ -50,33 +50,10 @@ int32_t main(int32_t argc, char **argv) {
 
         cluon::data::Envelope data;
         cluon::OD4Session od4{static_cast<uint16_t>(std::stoi(commandlineArguments["cid"]))};
+
+        uint32_t errorCount = 0;
         
-        // Interface to OxTS.
-        const std::string ADDR("0.0.0.0");
-        const std::string PORT(commandlineArguments["port"]);
-        
-        //if (VERBOSE){
-            cluon::UDPReceiver UdpSocket(ADDR, std::stoi(PORT),
-                [&od4Session = od4, &decoder=gpio, VERBOSE, ID](std::string &&d, std::string &&/*from*/, std::chrono::system_clock::time_point &&tp) noexcept {
-                
-                cluon::data::TimeStamp sampleTime = cluon::time::convert(tp);
-                std::time_t epoch_time = std::chrono::system_clock::to_time_t(tp);
-                std::cout << "[PROXY-GPIO-UDP] Time: " << std::ctime(&epoch_time) << std::endl;
-                std::cout << "[PROXY-GPIO-UDP] Got data:" << d << std::endl;
-
-                int16_t senderStamp = (int16_t) decoder.decode(d);
-                int16_t pinState = (int16_t) round((decoder.decode(d)- ((float) senderStamp))*10);
-                senderStamp += (int16_t) ID*1000;
-                // if (retVal.first) {
-
-                opendlv::proxy::SwitchStateRequest msg;
-                msg.state(pinState);
-                od4Session.send(msg, sampleTime, senderStamp);
-
-            });
-        //}
-
-        auto onSwitchStateRequest{[&gpio, &VERBOSE](cluon::data::Envelope &&envelope)
+        auto onSwitchStateRequest{[&gpio, &VERBOSE, &errorCount](cluon::data::Envelope &&envelope)
         {   
             if (!gpio.getInitialised()){
                 return;
@@ -84,6 +61,9 @@ int32_t main(int32_t argc, char **argv) {
             auto const gpioState = cluon::extractMessage<opendlv::proxy::SwitchStateRequest>(std::move(envelope));
             int16_t pin = envelope.senderStamp()-gpio.getSenderStampOffsetGpio();
             bool value = gpioState.state();
+            if (pin == 27){ //Heartbeat
+                errorCount = 0;
+            }
             gpio.SetValue(pin, value);
 
             if (VERBOSE){
@@ -92,23 +72,29 @@ int32_t main(int32_t argc, char **argv) {
         }};
         od4.dataTrigger(opendlv::proxy::SwitchStateRequest::ID(), onSwitchStateRequest);
         
-        if (VERBOSE){
-            auto onSwitchStateReading{[&gpio, &VERBOSE](cluon::data::Envelope &&envelope)
-                {
-                    if (!gpio.getInitialised()){
-                        return;
-                    }
-                    auto const gpioState = cluon::extractMessage<opendlv::proxy::SwitchStateReading>(std::move(envelope));
-                    int16_t pin = envelope.senderStamp()-gpio.getSenderStampOffsetGpio();
-                    bool value = gpioState.state();
-                    
-                            std::cout << "[GPIO-READ] The read pin: " << pin
-                                    << " state:"
-                                    << value
-                                    << std::endl;
-            }};
-            od4.dataTrigger(opendlv::proxy::PedalPositionRequest::ID(), onSwitchStateReading);
-        }
+        auto heartbeatThread{[&gpio, &od4, &errorCount]()
+        {
+            if (!gpio.getInitialised()){
+                return;
+            }
+            using namespace std::literals::chrono_literals;
+            bool heatbeat = 0;
+
+            std::chrono::system_clock::time_point threadTime = std::chrono::system_clock::now();
+
+
+            while (true) {
+                if (errorCount <= 2){
+                    errorCount++;
+                    heatbeat = !heatbeat;
+                    gpio.SetValue(27, heatbeat);
+                    std::this_thread::sleep_until(std::chrono::duration<double>(0.033)+threadTime);
+                    threadTime = std::chrono::system_clock::now();
+                }
+            }
+
+        }};
+        std::thread hbThread(heartbeatThread);
         
         auto atFrequency{[&od4, &gpio]() -> bool
         {            

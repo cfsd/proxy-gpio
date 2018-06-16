@@ -39,6 +39,11 @@
         "tuple": "cpp",
         "type_traits": "cpp",
         "typeinfo": "cpp",
-        "utility": "cpp"
+        "utility": "cpp",
+        "csignal": "cpp",
+        "unordered_map": "cpp",
+        "vector": "cpp",
+        "deque": "cpp",
+        "numeric": "cpp"
     }
 }
