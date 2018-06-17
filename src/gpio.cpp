@@ -63,6 +63,7 @@ int32_t main(int32_t argc, char **argv) {
             bool value = gpioState.state();
             if (pin == 27){ //Heartbeat
                 errorCount = 0;
+                //std::cout << "[GPIO-WRITE] Error count in receive: " << errorCount << std::endl;
             }else{
                 gpio.SetValue(pin, value);
             }
@@ -84,13 +85,16 @@ int32_t main(int32_t argc, char **argv) {
 
 
             while (true) {
+                
                 if (errorCount <= 2){
                     errorCount++;
                     heatbeat = !heatbeat;
                     gpio.SetValue(27, heatbeat);
+                }else{
+                    std::cout << "[GPIO-Heartbeat] Error count in thread: " << errorCount << std::endl;
+                }
                     std::this_thread::sleep_until(std::chrono::duration<double>(0.033)+threadTime);
                     threadTime = std::chrono::system_clock::now();
-                }
             }
 
         }};
