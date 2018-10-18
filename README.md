@@ -1,3 +1,35 @@
+# GPIO : General Purpose Input Output
+
+set/get the value from the pin.
+
+offset = 1000
+
+"in" means write, "out" means read
+
+| gpin Pin              | Pin NO | Inital Value | In/Out |
+|-----------------------|:------:|:------------:|--------|
+|                       |   26   |       0      |  out   |
+| m_gpioPinHeartbeat    |   27   |       0      |  out   |
+| m_gpioPinEbsSpeaker   |   44   |       0      |  out   |
+| m_gpioPinCompressor   |   45   |       0      |  out   |
+| m_gpioPinSteerRight   |   46   |       0      | ?out?  |
+|                       |   47   |       0      |  out   |
+| m_gpioPinEbsOk        |   49   |       0      |  in    |
+| m_gpioPinEbsRelief    |   61   |       0      |  out   |
+|                       |   62   |       0      |  out   |
+| m_gpioPinClamp        |   65   |       0      | ?out?  |
+| m_gpioPinFinished     |   66   |       0      |  out   |
+| m_gpioPinShutdown     |   67   |       0      |  out   |
+|                       |   68   |       0      |  out   |
+| m_gpioPinServiceBrake |   69   |       0      |  out   |
+| m_gpioPinClampSensor  |  112   |       0      |  in    |
+| m_gpioPinAsms         |  115   |       0      |  in    |
+
+### potential problem:
+
+the set Value function does not have a return, although in the function there is a check 
+
+
 ## OpenDLV Microservice for Beaglebone
 
 This repository provides source code for beaglebones for the OpenDLV.io software ecosystem.
